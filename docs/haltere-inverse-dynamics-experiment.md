@@ -180,7 +180,7 @@ Layout: three landscape columns.
 [ left haltere pad ] [ fly motor-neuron sprite ] [ right haltere pad ]
 ```
 
-- **Middle**: `FlySpriteView` draws a 12-region body map (head, thorax,
+- **Middle**: `FlySpriteView` draws an 11-region body map (head, thorax,
   abdomen, 2 wings, 6 legs — user-supplied SVG geometry, ported directly to
   Android `Path`/`Canvas` calls, no SVG library dependency) with a
   permanent gray outline per region and a fill that starts fully
@@ -230,7 +230,7 @@ alongside it, and a clean, independent change (`BugRegistry` now lists only
   side doesn't yet.
 - `nm` (notum muscle, 24 cells) and `xm` (6 cells) `vnc_motor` subclasses
   have no sprite region and are invisible to this tool entirely.
-- The CSV schema is a 12-region aggregate (cluster name + per-region Hz),
+- The CSV schema is an 11-region aggregate (cluster name + per-region Hz),
   not the same per-cell shape as the desktop dataset (205-dim binary
   stimulation vector, 67-dim per-wm-cell spike counts) —
   `inverse_data_device.py` bridges this by re-simulating cleanly rather
@@ -263,7 +263,7 @@ alongside it, and a clean, independent change (`BugRegistry` now lists only
 - `flappy/haltere_cluster_sweep.py` — full-network, per-named-cluster
   stimulation sweep; also exposes `haltere_clusters()`, reused by the
   device-data and Android export paths.
-- `flappy/fly_regions.py` — the 12-region sprite body map → `vnc_motor`
+- `flappy/fly_regions.py` — the 11-region sprite body map → `vnc_motor`
   cell indices.
 - `doom/export_android.py` — extended with `motor_regions` and
   `haltere_clusters` manifest sections.

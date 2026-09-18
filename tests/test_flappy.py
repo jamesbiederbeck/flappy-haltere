@@ -6,7 +6,7 @@ from connectome_sim.vision.retina import BilinearLuminance
 
 
 def test_bilinear_luminance_wraps_retinal_samples_unchanged():
-    from doom.game import retinal_samples
+    from connectome_sim.photoreceptor import retinal_samples
     uv = np.array([[0, 0], [1, 1], [.5, .5]], dtype=np.float32)
     image = np.zeros((4, 4, 3), dtype=np.uint8)
     image[0, 0] = 255
