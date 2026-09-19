@@ -101,7 +101,7 @@ def main():
     p.add_argument('--out', default=None)
     args = p.parse_args()
 
-    path = ROOT / 'outputs/doom' / args.dataset / 'graph.npz'
+    path = ROOT / 'outputs/connectome_sim' / args.dataset / 'graph.npz'
     if args.backend == 'gpu':
         from connectome_sim.gpu import GPUBrain
         brain = GPUBrain(path)

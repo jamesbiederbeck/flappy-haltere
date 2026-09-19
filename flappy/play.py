@@ -1,6 +1,6 @@
 """Standalone Flappy Bird driver for the connectome simulation, no server/UI.
 
-Drives the same fixed synaptic weights (outputs/doom/<dataset>/graph.npz) used
+Drives the same fixed synaptic weights (outputs/connectome_sim/<dataset>/graph.npz) used
 by doom/server.py through an unrelated sensory context -- no claim this is
 biologically meaningful for Flappy Bird specifically, same honesty stance as
 the rest of doom/. Mirrors the shape of doom/benchmark_gpu.py: a local script
@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(ticks, dataset, seed, backend, haltere_gain=1.):
-    path = ROOT / 'outputs/doom' / dataset / 'graph.npz'
+    path = ROOT / 'outputs/connectome_sim' / dataset / 'graph.npz'
     if backend == 'gpu':
         from connectome_sim.gpu import GPUBrain
         brain = GPUBrain(path)

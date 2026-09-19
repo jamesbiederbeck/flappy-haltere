@@ -44,7 +44,7 @@ def propose(model, response_counts):
 
 def roundtrip(model_path, backend, duration_ms, min_k, max_k, min_amp, max_amp, threshold, seed):
     model = load_model(model_path)
-    path = ROOT / 'outputs/doom/malecns_v1/graph.npz'
+    path = ROOT / 'outputs/connectome_sim/malecns_v1/graph.npz'
     if backend == 'gpu':
         from connectome_sim.gpu import GPUBrain
         brain = GPUBrain(path)

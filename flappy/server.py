@@ -36,7 +36,7 @@ stop = threading.Event()
 def run_loop(args):
     global latest
     try:
-        path = ROOT / 'outputs/doom' / args.dataset / 'graph.npz'
+        path = ROOT / 'outputs/connectome_sim' / args.dataset / 'graph.npz'
         if args.backend == 'gpu':
             from connectome_sim.gpu import GPUBrain, GPU_BUILD
             brain = GPUBrain(path); build = GPU_BUILD

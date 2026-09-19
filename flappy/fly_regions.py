@@ -72,7 +72,7 @@ def compute_regions(ids):
 
 if __name__ == '__main__':
     import numpy as np
-    g = np.load(ROOT / 'outputs/doom/malecns_v1/graph.npz')
+    g = np.load(ROOT / 'outputs/connectome_sim/malecns_v1/graph.npz')
     regions = compute_regions(g['ids'])
     for name, idx in regions.items():
         print(name, len(idx))
