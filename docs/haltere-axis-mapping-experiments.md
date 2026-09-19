@@ -1,144 +1,120 @@
-# Discovering the physical mapping of haltere afferents to axes
+# Finding which haltere clusters carry which rotation axis
 
-A design, not a result. The goal is to get from *effective* axes — "stimulating
-this cluster produces that wing response", which `flappy/haltere_cluster_sweep.py`
-already measures — to *physical* ones: which cells sense which axis of rotation,
-and where on the haltere they sit.
+A protocol, not a result. `flappy/haltere_cluster_sweep.py` already measures what
+each cluster does to the wings when driven alone. This asks the next question:
+which clusters are *antagonist pairs*, and which pairs carry which axis.
 
-## The constraint that shapes everything
+## What the dataset already settles
 
-**MaleCNS v1.0 carries no positional information for these cells.** Checked
-directly on all 205 haltere afferents:
+Two things that would otherwise need arguing, checked directly on all 205
+haltere afferents in MaleCNS v1.0:
 
-| field | value |
-| --- | --- |
-| `entryNerve` | `DMetaN` for all 205 — confirms the haltere nerve, says nothing about position within it |
-| `somaLocation`, `tosomaLocation`, `somaNeuromere` | empty for all 205 |
-| `mancSerial`, `mcnsSerial`, `serialMotif` | empty for all 205 |
-| `instance` | `SApp_L` / `SApp_R` — side only |
-| `type` | 148 `SApp`, plus 11 types of 2–8 cells |
-| `statusLabel` | **151 "Prelim Roughly traced"**, 54 "Reviewed" |
+**The typed clusters are reviewed.** `statusLabel` is `Reviewed` for 51 of the 53
+cells in the ten named `SNpp*`/`SNxx*` types. All 148 preliminary cells are the
+undifferentiated `SApp` bulk, which is not a candidate cluster. Tracing quality
+is not a confound for this experiment.
 
-So the physical mapping cannot be *derived* from this dataset. It can only be
-*anchored*: each experiment below proposes a correspondence to external anatomy
-and states what would refute it. Nothing here produces ground truth on its own.
+**Cross-side homology is given by construction.** Every type is bilaterally
+near-symmetric — `SNpp14` 3/3, `SNpp34` 4/4, `SNpp21` 2/2, and so on — so the
+left and right members of a type are the same cluster on opposite sides. `L-A`
+and `R-A` need no matching step, which is what keeps the combinatorics small.
 
-The directional tuning of a real haltere afferent is a property of its
-campaniform sensillum's position and orientation on the haltere base, and of
-stroke phase — Coriolis force is ω × haltere velocity, so selectivity is
-time-varying within a beat. None of that is in a CNS connectome.
+Ten typed clusters per side, ~3 cells each, plus the `SApp` bulk of ~74.
 
-## E1 — Tracing-quality stratification (gate; run first)
+## The protocol
 
-Repeat the cluster sweep restricted to the 54 `Reviewed` cells, then to the 151
-preliminary ones separately.
+Pick a candidate antagonist pair `A`, `B` from the ten types. Because homology is
+given, that fixes all four groups: `L-A`, `L-B`, `R-A`, `R-B`. Drive them with a
+tonic baseline modulated at wingbeat frequency, in four sign conditions:
 
-- **Prediction if sound:** cluster boundaries and motor-response signatures
-  survive in the reviewed subset.
-- **Refutation:** they do not, in which case every experiment below is measuring
-  reconstruction noise and the honest answer is "not yet answerable in this
-  dataset". Report that outcome rather than proceeding.
+| condition | L-A | L-B | R-A | R-B | drive symmetry |
+| --- | --- | --- | --- | --- | --- |
+| 1 | + | − | + | − | symmetric |
+| 2 | + | − | − | + | antisymmetric |
+| 3 | − | + | + | − | antisymmetric (negation of 2) |
+| 4 | − | + | − | + | symmetric (negation of 1) |
 
-Cheap, and it gates the rest. Do not skip it because the full-set result looks
-tidy.
+Conditions 3 and 4 are the sign-negations of 2 and 1. That redundancy is the
+point: it is the falsification test.
 
-## E2 — Cell-count matching against published fields
+The symmetry of the drive is the mechanical anchor. A pitch rotation loads both
+halteres in phase; roll and yaw load them in antiphase. So conditions 1/4 are the
+pitch-like drive and 2/3 the roll/yaw-like drive, and a correct pairing should
+show that separation in the motor response.
 
-*Drosophila* haltere campaniform sensilla are organised into named fields (dorsal
-and ventral fields, scapal plates, Hicks papillae) with published per-field
-counts. Compare our ~102 afferents per side against those.
+## Four things this needs pinned down
 
-- **Prediction:** some partition of our clusters sums to published field sizes.
-- **Refutation:** our per-side count falls well short of the anatomical total, in
-  which case the reconstruction samples the afferent population incompletely and
-  count-matching is invalid as an anchor.
+**A tonic baseline.** Afferent current cannot go negative, so `+`/`−` mean `B±Δ`
+around a baseline. Campaniform afferents are tonically active, so this is
+biologically reasonable — but the haltere response is non-monotonic in current
+(see `AGENTS.md`), so characterise each cluster's response curve first and pick
+`B` and `Δ` inside a monotonic region. Record the curve alongside the result.
 
-Look the counts up from the primary anatomy literature and record the source in
-the run output. Do not take them from memory — mine or anyone's.
+**Modulation phase.** Coriolis force is ω × v_haltere, so it peaks at maximum
+stroke *velocity* — 90° out of phase with stroke position. Modulate accordingly,
+and state the convention in the output, because a phase error here inverts the
+interpretation rather than degrading it.
 
-## E3 — The monosynaptic b1 anchor
+**Brain step rate.** `play.py` steps the brain at 30 Hz, which cannot carry a 218
+Hz modulation. `Brain.dt` is 0.1 ms so the rate is resolvable; the loop needs
+stepping at ~1–2 kHz for these trials.
 
-There is a well-known, functionally characterised direct connection from haltere
-campaniform afferents onto the b1 steering motor neuron. That is a literature
-anchor testable in the graph today.
+**No body in the search.** What is being measured is a motor response to an
+injected drive — connectome only, no MuJoCo. Keeping the body out makes each
+trial cheap and removes a live confound (the fly does not currently generate
+lift). Bring the body back only to confirm that a winning pairing produces the
+expected wing kinematics.
 
-- **Prediction:** exactly one cluster shows strong direct (1-hop) connectivity to
-  b1 MN, and that cluster is the candidate for the field described in the source.
-- **Refutation:** no cluster does, or several do indistinguishably.
+## Deciding whether a pairing is correct
 
-Verify the claim and the field identity against the paper before relying on it;
-this is the step where a half-remembered citation becomes a wrong axis label.
+Record, per condition, the wing motor response as a vector over muscles and
+sides (`b1`/`b2`/`hg1` L and R, plus DLM), with both rate and phase at the
+modulation frequency. Three criteria, all falsifiable:
 
-## E4 — Antagonist pairing
+1. **Sign inversion.** response(1) ≈ −response(4) and response(2) ≈ −response(3).
+   Measure as cosine similarity; a correct antagonist pair approaches −1. A pair
+   that fails this is not an antagonist pair, whatever else it does.
+2. **Symmetry separation.** Project each response onto the symmetric (L+R) and
+   antisymmetric (L−R) subspaces. A correct pairing puts conditions 1/4 mostly in
+   the symmetric subspace and 2/3 mostly in the antisymmetric one. Cross-talk
+   between the two is the quantitative form of "the brain thinks it is being
+   twisted rather than rotated".
+3. **Phase consistency.** Response phase at the modulation frequency should be
+   stable within a condition and flip with the drive sign. Scattered phase means
+   the drive is not being read as a rhythmic signal at all.
 
-Dorsal and ventral fields are mechanically antagonistic: a given deflection
-strains one and unloads the other.
+## Cost
 
-- **Prediction:** cluster motor-response vectors pair up anticorrelated —
-  push/pull structure in the response matrix from the existing sweep.
-- **Refutation:** all responses are positively correlated and differ only in
-  magnitude, meaning there is one effective channel with a gain, not a set of
-  fields.
+45 pairings × 4 conditions = 180 trials, plus the per-cluster response curves.
+Each trial is ~10 wingbeats (~46 ms) of connectome simulation at ~1-2 kHz
+stepping. Fresh `NativeBrain` per condition — state carries, and reusing one
+across amplitudes has already produced a wrong answer in this project.
 
-Uses data the sweep already produces; this is analysis, not new simulation.
+## What the outcomes mean
 
-## E5 — Symmetric vs antisymmetric drive
+**Several pairings pass all three criteria.** Then the ones that separate
+symmetric from antisymmetric are the axis-carrying pairs, and the assignment of
+which antisymmetric pair is roll versus yaw needs one more discriminator — most
+naturally the sign of the steering response, checked against the direction a fly
+corrects in.
 
-The one axis claim with a mechanical basis available today. Pitch loads both
-halteres in phase; roll and yaw load them in antiphase.
+**Exactly one passes.** Strongest outcome, and the one to be most suspicious of.
+Check it against the known monosynaptic haltere-afferent→b1 motor neuron
+connection: the winning pair should show that connectivity in the graph.
 
-- **Prediction:** co-stimulating L and R produces a response distinguishable from
-  differential L−R stimulation — plausibly power/amplitude change versus steering
-  asymmetry.
-- **Refutation:** the two are indistinguishable at the motor pool, meaning side
-  carries no axis information and the joystick has one channel.
+**None passes.** Either the antagonist structure is not recoverable from
+connectivity alone, or the modulation is not reaching the motor pool. Distinguish
+those with a positive control: drive a single cluster at the same modulation and
+confirm a phase-locked motor response exists at all.
 
-This is the experiment most likely to yield something usable soon, and its result
-is honest either way.
+## What this licenses calling it
 
-## E6 — Cross-dataset replication
+An axis assignment that passes all three criteria is a **functional** mapping:
+these clusters behave as an antagonist pair carrying a symmetric or antisymmetric
+signal, and driving them produces the motor pattern a rotation about that axis
+should. It is not a claim about which campaniform field each cluster innervates
+or where on the haltere base it sits — that needs external anatomy, and nothing
+in a CNS connectome supplies it.
 
-Run E1 and E4 against an independent connectome (FlyWire) and compare cluster
-structure.
-
-- **Prediction:** structural clusters replicate; reconstruction artifacts do not.
-- **Refutation / caveat:** a different animal and a different sex. This project
-  already refuses to copy a male sensory map onto female data for the retina; the
-  same hazard applies here, so replication is evidence about robustness, not a
-  merge of the two datasets.
-
-## E7 — Forward-model anchoring (the only in-silico route to physical axes)
-
-Build the haltere as a mechanical object and predict, per named field, the strain
-time-course produced by each rotation axis. Then ask which cluster's measured
-response profile best matches which field's predicted profile.
-
-Prerequisites, none of which exist yet:
-
-1. The halteres must actually beat — they currently move 3e-06 rad and no
-   actuator commands them.
-2. The model must have sensors. It has **zero** (`nsensor == 0`).
-3. Field positions and orientations on the haltere base, from external anatomy.
-
-This is the experiment that would justify calling an axis assignment physical,
-and it is why "wire up the halteres" is a prerequisite for the mapping question
-rather than a separate piece of work. Pre-register the predicted
-cluster→field assignment before running it.
-
-## E8 — Ground truth
-
-Targeted physiology, or an EM volume that includes the haltere nerve periphery
-and the sensilla themselves. Outside what this project can do; named so that the
-ladder above is not mistaken for reaching it.
-
-## What counts as done
-
-If E1–E5 pass and E7 is not run, the result is a set of **effective axes**:
-channels named by what they do to the wings, useful as a joystick, and not a
-claim about what the fly senses. That is a legitimate deliverable — it is what an
-IMU or an airframe needs — but it must be labelled as such everywhere it appears,
-the way `haltere_cluster_sweep.py` already labels its own output.
-
-Only E7 with an external anatomical anchor licenses the word *physical*, and even
-then it is a correspondence with a stated residual, like the ommatidia
-registration.
+For a joystick, an IMU or an airframe, the functional mapping is the useful one.
+Label it as functional wherever it appears.
