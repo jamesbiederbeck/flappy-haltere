@@ -44,6 +44,12 @@ which is what running from there gives you.
 git submodule update --init --recursive
 ```
 
+## Mapping neurons to axes
+
+`docs/haltere-axis-mapping-experiments.md` designs the experiments that would
+take this from effective axes (what a cluster does to the wings) to physical ones
+(what it senses), and states the dataset limits that make the second hard.
+
 ## Stimulation is engineered, not biological
 
 Every haltere stimulation here is host-side current injected into the
