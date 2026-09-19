@@ -86,13 +86,18 @@ class InverseMLP:
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--data', default=str(ROOT / 'outputs/flappy_inverse/dataset*.npz'))
-    p.add_argument('--hidden', type=int, default=10000)
+    # 512, not 10000: the doc records hidden=10000 as overfitting outright
+    # (val BCE 0.688, worse than the 0.6485 marginal-frequency baseline), and
+    # every result since was produced at 512.
+    p.add_argument('--hidden', type=int, default=512)
     p.add_argument('--epochs', type=int, default=60)
     p.add_argument('--batch-size', type=int, default=128)
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--val-frac', type=float, default=0.15)
     p.add_argument('--seed', type=int, default=0)
-    p.add_argument('--out', default=str(ROOT / 'outputs/flappy_inverse/inverse_model.npz'))
+    # Must match what inverse_infer.py loads, or a retrain silently appears to
+    # do nothing: it writes one file while inference keeps reading the other.
+    p.add_argument('--out', default=str(ROOT / 'outputs/flappy_inverse/inverse_model_h512.npz'))
     args = p.parse_args()
 
     stim, response, haltere_ids, wm_ids = load_dataset(args.data)

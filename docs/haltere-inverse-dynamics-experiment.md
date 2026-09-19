@@ -153,7 +153,39 @@ effect is dominated by a single cell, not a synergistic pair. Retraining on
 the fully-combined dataset fixed the regression (IoU 1.0 at 6/7 tested
 currents).
 
+## Cross-validated against an independent sweep
+
+`flybody-connectome/experiments/haltere_axis_pairs.py` drives *pairs* of
+clusters (four groups, L/R x A/B, at two currents) on the native backend, rather
+than one cluster at a time on GPU. It independently reproduces the two findings
+this document rests on: only `SNpp12` and `SNpp23` drive the wing-muscle pool,
+and `SNpp14` — the one cluster with direct 1-hop wiring to the power muscles —
+does nothing. `tests/test_flappy_inverse.py` pins both.
+
+That sweep also exposed a number worth stating explicitly, because it is easy to
+design around wrongly: **recruitment threshold sits between 8 and 10 mV**
+(`SNpp12`: 29 spikes at 8 mV, 1,089 at 10). The axis-pair run used a baseline of
+11 ± 3 mV, so its "decrease" condition sat at 8 mV — below threshold — making
+its four conditions on/off rather than the intended sign flip. Any ± design here
+needs both levels above 10 mV.
+
+**The gap it could not fill.** The dataset schema is a binary per-cell mask plus
+*one scalar amplitude per trial*, so a trial driving two clusters at different
+currents simultaneously cannot be represented. That is precisely what an IMU
+produces and what the axis-pair conditions are, so those runs cannot contribute
+training data without a schema change to a per-cell current vector. Feeding them
+in as-is would give four different responses the same label — the same class of
+mistake as using the raw device CSV.
+
 ## Every retrain is a full retrain
+
+**The defaults used to work against you here.** `--hidden` defaulted to 10000 —
+the configuration this document records as overfitting outright — and `--out`
+defaulted to `inverse_model.npz`, while all three `inverse_infer.py` subcommands
+load `inverse_model_h512.npz`. So a bare `python -m flappy.inverse_train` trained
+the rejected model and wrote it where inference never looks, and the retrain
+appeared to do nothing. Both defaults now match the accepted configuration, and
+`test_train_writes_where_infer_reads` guards it.
 
 Each call to `flappy/inverse_train.py` creates a brand-new,
 randomly-initialized `InverseMLP` and trains it for 60 epochs from scratch
