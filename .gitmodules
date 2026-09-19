@@ -3,4 +3,4 @@
 	url = https://github.com/jamesbiederbeck/flappy-bird-gymnasium
 [submodule "connectome_sim"]
 	path = connectome_sim
-	url = /home/victor/code/playground/connectome-sim
+	url = https://github.com/jamesbiederbeck/connectome-sim.git
