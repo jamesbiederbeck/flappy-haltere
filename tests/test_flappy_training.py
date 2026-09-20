@@ -3,13 +3,14 @@ tests/test_doom_live_training.py's PulseBrain-stub approach -- no real graph
 needed since FlapTraining only calls brain.rgb_step/memory."""
 import numpy as np
 import pytest
-from flappy.training import FlapTraining
+from flappy.training import APPETITIVE_CURRENT, AVERSIVE_CURRENT, FlapTraining
 
 
 class PulseBrain:
     def __init__(self):
         self.n = 3; self.cursor = 0; self.dt = .1
         self.circuit = {'dan': np.array([2]), 'edges': np.array([0])}
+        self.sugar = np.array([1])
         self.baseline_plastic = np.array([20.], dtype=np.float32)
         self.weight = np.array([20., .5, .3], dtype=np.float32)
         self.weights_frozen = False
@@ -89,3 +90,59 @@ def test_telemetry_reports_changed_edges():
     report = t.telemetry()
     assert report['changed_edges'] == 1
     assert report['maximum_efficacy'] == pytest.approx(15. / 20.)
+
+
+def _currents(call):
+    return [] if call[3] is None else [(tuple(np.atleast_1d(i)), c) for i, c in call[3]]
+
+
+def test_cleared_pipe_drives_the_sugar_cells_not_the_dan():
+    b = PulseBrain(); t = FlapTraining(b)
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    t.observe(False, True)
+    assert t.rewards == 1 and t.events == 0
+    t.step(frame, 33.3)
+    assert ((1,), APPETITIVE_CURRENT) in _currents(b.calls[-1])
+    assert not any(c == AVERSIVE_CURRENT for _, c in _currents(b.calls[-1]))
+
+
+def test_sugar_pulse_is_the_same_2000_steps_as_the_aversive_one():
+    b = PulseBrain(); t = FlapTraining(b)
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    t.observe(False, True)
+    for _ in range(8):
+        t.step(frame, 333.)
+    assert t.reward_steps == 2000
+    assert t.delivered_steps == 0  # the aversive channel never fired
+
+
+def test_overlapping_windows_deliver_both_currents_in_one_segment():
+    b = PulseBrain(); t = FlapTraining(b)
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    t.observe(True, True)  # struck a pipe on the same tick one was cleared
+    t.step(frame, 33.3)
+    currents = _currents(b.calls[-1])
+    assert ((2,), AVERSIVE_CURRENT) in currents
+    assert ((1,), APPETITIVE_CURRENT) in currents
+
+
+def test_windows_split_the_tick_independently():
+    b = PulseBrain(); t = FlapTraining(b)
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    t.observe(False, True)          # sugar until 2000
+    b.cursor = 500
+    t.observe(True, False)          # dopamine until 2500
+    b.cursor = 0
+    t.step(frame, 300.)             # 3000 steps, boundaries at 2000 and 2500
+    segments = [(c[1], sorted(x for _, x in _currents(c))) for c in b.calls]
+    assert segments == [(2000, [AVERSIVE_CURRENT, APPETITIVE_CURRENT]),
+                        (500, [AVERSIVE_CURRENT]), (500, [])]
+
+
+def test_reward_disabled_ignores_a_cleared_pipe():
+    b = PulseBrain(); t = FlapTraining(b, reward=False)
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    t.observe(False, True)
+    assert t.rewards == 0
+    t.step(frame, 33.3)
+    assert b.calls[-1][3] is None

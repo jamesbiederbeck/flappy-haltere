@@ -12,17 +12,18 @@ horizontally, placed by distance rather than by screen position. See that
 module for why the shipped camera's picture misrepresents what the bird can
 actually do about an obstacle.
 
-Both pipes are projected: the lower pipe as a hurdle standing on the
-ground, the upper pipe as an overhang hanging from above -- the two edges of
-the gap the bird has to thread. Game physics, scoring and collision are
-untouched throughout; only the picture changes, for both the neural visual
-input and the human broadcast view (always the same frame here, matching
+Only the *lower* pipe is projected: a hurdle has no ceiling above the
+runner. The upper pipe still exists in the env and still ends the episode
+on collision -- flying too high remains exactly as fatal -- it is simply
+not drawn as an obstacle. Game physics, scoring and collision are untouched
+throughout; only the picture changes, for both the neural visual input and
+the human broadcast view (always the same frame here, matching
 doom/game.py's convention).
 """
 import numpy as np
 import pygame
 from flappy_bird_gymnasium.envs.constants import (
-    PIPE_HEIGHT, PIPE_VEL_X, PLAYER_HEIGHT, PLAYER_WIDTH)
+    PIPE_HEIGHT, PIPE_VEL_X, PIPE_WIDTH, PLAYER_HEIGHT, PLAYER_WIDTH)
 from flappy_bird_gymnasium.envs.flappy_bird_env import FlappyBirdEnv
 from flappy.render3d import MIN_DEPTH, render
 
@@ -34,7 +35,8 @@ FPS = 30
 
 
 class Game:
-    def __init__(self, seed=41027, score_limit=None, no_pipes=False, perspective=True):
+    def __init__(self, seed=41027, score_limit=None, no_pipes=False, perspective=True,
+                 pipes_terminate=True):
         self.env = FlappyBirdEnv(render_mode='rgb_array', use_lidar=False, score_limit=score_limit)
         if no_pipes:
             # Park every generated pipe far off both the visible screen and
@@ -44,6 +46,16 @@ class Game:
             # episode; only the pipe obstacle is removed.
             self.env._get_random_pipe = lambda: [{'x': -9999, 'y': -9999}, {'x': -9999, 'y': -9999}]
         self._no_pipes = no_pipes
+        self._pipes_terminate = bool(pipes_terminate)
+        if not self._pipes_terminate:
+            # Pass-through pipes: the bird still sees them, still has to clear
+            # them to score, but hitting one no longer ends the episode, so the
+            # simulation is never reset on a pipe strike. Ground and ceiling
+            # remain fatal -- without them the bird falls out of the world and
+            # the visual input stops meaning anything. Same host-side patching
+            # technique as the no_pipes path above; the vendored submodule and
+            # the pipe geometry are untouched, only the termination test is.
+            self.env._check_crash = self._ground_collision
         self._perspective = perspective
         self._colors = None
         self._seed = seed
@@ -78,6 +90,12 @@ class Game:
         self.tick = 0
         self._finished = False
         self._score = 0
+        self._in_pipe = False
+        self._struck_pipe = False
+        self._cleared_pipe = False
+        self._struck_since_score = False
+        self.pipe_strikes = 0
+        self.pipes_cleared = 0
 
     def pixels(self):
         if self._finished: raise RuntimeError('Episode finished; reset is required')
@@ -128,12 +146,45 @@ class Game:
             }
         return self._colors
 
+    def _ground_collision(self):
+        """The env's own ground test, lifted verbatim from
+        FlappyBirdEnv._check_crash so the pass-through mode keeps exactly the
+        boundary behavior it had."""
+        return self.env._player_y + PLAYER_HEIGHT >= self.env._ground['y'] - 1
+
+    def _pipe_collision(self):
+        """Pipe overlap only, computed the same way the env does. Reported
+        independently of termination so the aversive signal survives
+        pipes_terminate=False -- a pipe strike is still a pipe strike when it
+        no longer ends the episode."""
+        env = self.env
+        player = pygame.Rect(env._player_x, env._player_y, PLAYER_WIDTH, PLAYER_HEIGHT)
+        return any(player.colliderect(pygame.Rect(pipe['x'], pipe['y'], PIPE_WIDTH, PIPE_HEIGHT))
+                   for pipe in [*env._upper_pipes, *env._lower_pipes])
+
     def act(self, flap):
         # The adapter is the only caller of env.step. No human keystrokes.
+        score_before = self._score
         _, reward, terminated, truncated, info = self.env.step(int(bool(flap)))
         self.tick += 1
         self._finished = terminated or truncated
         self._score = info['score']
+        # Rising edge only: a pass-through bird overlaps the same pipe for
+        # several consecutive ticks, which is one strike, not several.
+        inside = self._pipe_collision()
+        self._struck_pipe = inside and not self._in_pipe
+        self._in_pipe = inside
+        self.pipe_strikes += int(self._struck_pipe)
+        self._struck_since_score = self._struck_since_score or inside
+        # The env scores on x-passage alone, so with pipes_terminate=False a
+        # bird that ploughs straight through still scores. "Cleared" means
+        # scored *and* never touched that pipe -- the actual avoidance event.
+        # With terminating pipes a strike ends the episode anyway, so the two
+        # coincide and this costs nothing.
+        self._cleared_pipe = self._score > score_before and not self._struck_since_score
+        if self._score > score_before:
+            self._struck_since_score = inside
+            self.pipes_cleared += int(self._cleared_pipe)
         if not self._finished:
             self._frame = self.env.render()
         return float(reward)
@@ -144,7 +195,10 @@ class Game:
         # range [PLAYER_MIN_VEL_Y, PLAYER_MAX_VEL_Y] per
         # flappy_bird_gymnasium.envs.constants.
         return {'episode': self.episode, 'tick': self.tick, 'finished': self._finished,
-                'score': self._score, 'y_velocity': float(self.env._player_vel_y),
+                'score': self._score, 'struck_pipe': self._struck_pipe, 'cleared_pipe': self._cleared_pipe,
+                'in_pipe': self._in_pipe, 'pipe_strikes': self.pipe_strikes,
+                'pipes_cleared': self.pipes_cleared,
+                'y_velocity': float(self.env._player_vel_y),
                 'y': float(self.env._player_y), 'rotation': float(self.env._player_rot)}
 
     def geometry(self):
