@@ -47,14 +47,32 @@ class Game:
         self._perspective = perspective
         self._colors = None
         self._seed = seed
+        # flappy_bird_env only ever draws randomness for _get_random_pipe's
+        # gap index (flappy_bird_gymnasium/envs/flappy_bird_env.py:420), via
+        # self.np_random. Gymnasium's reset(seed=None) does not reseed --
+        # it continues that same generator from wherever it was left. So
+        # passing seed once at episode 0 and None thereafter (as this used
+        # to do, mirroring doom/game.py) makes every episode after the first
+        # inherit whatever RNG state episode 1 happened to consume, which
+        # depends on how many ticks episode 1 ran for -- itself a function
+        # of the neural policy's timing, which is not run-to-run identical
+        # on the GPU backend (see AGENTS.md / README on that). The result:
+        # at a fixed --seed, only episode 1's pipe course was ever
+        # reproducible; episode 2 onward silently varied with policy
+        # timing, and every multi-episode metric taken from a "fixed seed"
+        # run inherited that. A dedicated generator, seeded once from
+        # `seed`, hands each episode boundary its own draw so every
+        # episode's course is a fixed function of (seed, episode index)
+        # alone -- episode 0 keeps passing `seed` directly, unchanged from
+        # before, so single-episode results are unaffected.
+        self._episode_rng = np.random.default_rng(seed)
         self.episode = 0
         self.new_episode()
 
     def new_episode(self):
-        # Seed only the first reset (matches doom/game.py's Game, which sets
-        # the ViZDoom seed once at construction); later resets continue the
-        # same RNG stream rather than replaying identical episodes forever.
-        self.env.reset(seed=self._seed if self.episode == 0 else None)
+        episode_seed = self._seed if self.episode == 0 else int(
+            self._episode_rng.integers(0, 2**31 - 1))
+        self.env.reset(seed=episode_seed)
         self._frame = self.env.render()
         self.episode += 1
         self.tick = 0
