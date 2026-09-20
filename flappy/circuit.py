@@ -61,15 +61,43 @@ def haltere_afferents(brain):
     return idx.astype(np.int32)
 
 
-def haltere_current_for_velocity(y_velocity, m=1.75, n=2., max_velocity=PLAYER_MAX_VEL_Y):
-    """A(dy) = m * dy^n, rectified to 0 while level or rising (y_velocity<=0)
-    and clipped to the game's own terminal fall speed before exponentiating
-    (undefined for negative bases at fractional n, unbounded otherwise).
+# Measured in E-SIGN (docs/sensory-encoding-experiments.md): with the visual
+# frame held fixed, DLM output peaks at an injected haltere current of 7-8 mV
+# (about 29 spikes/tick) and then falls monotonically to 0.19 at 175 -- a
+# factor of 150. Descending activity rises across that same sweep, so higher
+# drive recruits inhibition onto the motor pool rather than failing to reach
+# it. Without a ceiling, A(dy)=1.75*dy^2 reaches 175 at the game's terminal
+# fall speed, so the loop inverted: the faster the bird fell, the less it
+# flapped. That is positive feedback on falling.
+CURRENT_CEILING = 8.
+
+
+def haltere_current_for_velocity(y_velocity, m=1.75, n=2., max_velocity=PLAYER_MAX_VEL_Y,
+                                 ceiling=CURRENT_CEILING):
+    """A(dy) = min(m * dy^n, ceiling), rectified to 0 while level or rising
+    (y_velocity<=0) and clipped to the game's own terminal fall speed before
+    exponentiating (undefined for negative bases at fractional n, unbounded
+    otherwise).
+
     Default m=1.75, n=2 chosen via interactive search in
     flappy/tune_server.py, superseding the earlier linear m=1, n=1 baseline
     that just matched a constant-current test; neither is derived from
-    anything but this harness's own runs."""
+    anything but this harness's own runs.
+
+    `ceiling` defaults to the measured peak of the DLM response (see the note
+    above) and exists because the loop is otherwise inverted over almost all
+    of the fall-speed range the bird occupies. Pass ceiling=None for the
+    original unbounded behaviour, which is what every run before 2026-09-19
+    used -- scores are not comparable across that change.
+
+    With the ceiling in place this is a threshold controller rather than a
+    proportional one: below dy=2.14 the current is sub-rheobase and produces
+    no DLM spikes at all, above it the current pins at the peak. That is a
+    deliberate consequence of the measurement -- there is no monotone rising
+    region wide enough to be proportional over."""
     if not math.isfinite(max_velocity) or max_velocity <= 0: raise ValueError('Positive max_velocity required')
     if not all(math.isfinite(x) for x in (y_velocity, m, n)): raise ValueError('Finite velocity, m and n required')
+    if ceiling is not None and not (math.isfinite(ceiling) and ceiling > 0): raise ValueError('Positive ceiling required')
     if y_velocity <= 0: return 0.
-    return m * min(float(y_velocity), max_velocity) ** n
+    current = m * min(float(y_velocity), max_velocity) ** n
+    return current if ceiling is None else min(current, float(ceiling))

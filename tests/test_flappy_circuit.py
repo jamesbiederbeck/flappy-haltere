@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 from flappy import circuit as circuit_module
-from flappy.circuit import haltere_afferents, haltere_current_for_velocity, wing_motor_readouts
+from flappy.circuit import (CURRENT_CEILING, haltere_afferents,
+                            haltere_current_for_velocity, wing_motor_readouts)
 
 
 def synthetic_brain(monkeypatch, types_by_index, subclass_by_index):
@@ -49,19 +50,38 @@ def test_haltere_current_zero_while_rising_or_level():
     assert haltere_current_for_velocity(0., m=10., n=1., max_velocity=10.) == 0.
 
 
-def test_haltere_current_defaults_to_1_75_dy_squared():
-    assert haltere_current_for_velocity(5.) == 1.75 * 25.
+def test_haltere_current_defaults_to_1_75_dy_squared_below_the_ceiling():
+    """The power law is unchanged; it is only capped. E-SIGN measured DLM
+    output peaking at an injected current of 7-8 and falling 150-fold above it,
+    so CURRENT_CEILING clamps there. Below the ceiling nothing moved."""
+    assert haltere_current_for_velocity(2., ceiling=None) == 1.75 * 4.
+    assert haltere_current_for_velocity(2.) == 1.75 * 4.
     assert haltere_current_for_velocity(0.) == 0.
 
 
+def test_haltere_current_clamps_at_the_measured_peak():
+    """Above dy = 2.14 the uncapped law runs into the region where more current
+    produces less flapping, which inverted the whole feedback loop."""
+    assert haltere_current_for_velocity(5.) == CURRENT_CEILING
+    assert haltere_current_for_velocity(10.) == CURRENT_CEILING
+    assert haltere_current_for_velocity(5., ceiling=None) == 1.75 * 25.
+
+
 def test_haltere_current_applies_power_law():
-    assert haltere_current_for_velocity(5., m=2., n=1., max_velocity=10.) == 10.
-    assert haltere_current_for_velocity(3., m=1., n=2., max_velocity=10.) == 9.
-    assert haltere_current_for_velocity(4., m=2., n=0.5, max_velocity=10.) == 4.
+    assert haltere_current_for_velocity(5., m=2., n=1., max_velocity=10., ceiling=None) == 10.
+    assert haltere_current_for_velocity(3., m=1., n=2., max_velocity=10., ceiling=None) == 9.
+    assert haltere_current_for_velocity(4., m=2., n=0.5, max_velocity=10., ceiling=None) == 4.
 
 
 def test_haltere_current_clips_above_max_velocity():
-    assert haltere_current_for_velocity(50., m=1., n=1., max_velocity=10.) == 10.
+    assert haltere_current_for_velocity(50., m=1., n=1., max_velocity=10., ceiling=None) == 10.
+    # The velocity clip and the current ceiling are separate limits.
+    assert haltere_current_for_velocity(50., m=1., n=1., max_velocity=10.) == CURRENT_CEILING
+
+
+def test_haltere_current_rejects_invalid_ceiling():
+    with pytest.raises(ValueError):
+        haltere_current_for_velocity(5., ceiling=0.)
 
 
 def test_haltere_current_rejects_invalid_max_velocity():
