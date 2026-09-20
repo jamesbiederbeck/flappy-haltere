@@ -19,6 +19,13 @@ while it is far off, swelling and sinking as it is approached. Distance is
 carried by where the bar sits and how thick it is, not by where it sits
 left-to-right.
 
+The upper pipe is the same wall hung from above: an overhang, spanning the
+lateral axis and descending from out of sight down to the gap's upper edge.
+It was not drawn at all until 2026-09-19, which meant the view showed only the
+floor half of a gap the bird has to thread while the undrawn ceiling still
+ended the episode on contact. A gap is defined by both of its edges, and an
+agent shown one of them is being asked to infer the other from nothing.
+
 The ground carries depth stripes because an untextured plane projects to a
 constant split at the horizon no matter how high you are -- it would give the
 fly no altitude or speed cue at all, while altitude is the single thing it
@@ -53,7 +60,8 @@ def hazed(color, sky, depth, scale=HAZE_SCALE):
 
 
 def render(size, eye_y, ground_y, hurdles, travel, palette,
-           focal=FOCAL_PX, stripe_period=STRIPE_PERIOD, haze_scale=HAZE_SCALE):
+           focal=FOCAL_PX, stripe_period=STRIPE_PERIOD, haze_scale=HAZE_SCALE,
+           overhangs=()):
     """Project the world into the bird's own view.
 
     size: (height, width) of the frame to produce.
@@ -63,6 +71,12 @@ def render(size, eye_y, ground_y, hurdles, travel, palette,
         the wall's top edge (the height that has to be cleared).
     travel: how far the bird has flown, for the ground stripe phase.
     palette: 'sky', 'ground', 'stripe' and 'hurdle' colors as uint8 triples.
+    overhangs: (depth, bottom_y) per ceiling slab -- depth ahead of the eye,
+        and the y of its lower edge (the height that has to be stayed under).
+        Drawn in the same color as a hurdle because it is the same pipe;
+        what separates them in the view is which side of the gap they bound.
+        Defaults to none, so callers written before overhangs existed render
+        exactly as they did.
     """
     height, width = size
     if height < 2 or width < 1: raise ValueError('Frame too small to project into')
@@ -84,12 +98,23 @@ def render(size, eye_y, ground_y, hurdles, travel, palette,
         near = np.where(striped[:, None], palette['stripe'], palette['ground']).astype(np.float64)
         fade = (1. - np.exp(-depth / haze_scale))[:, None]
         frame[horizon:, :] = (near * (1 - fade) + np.asarray(palette['sky'], np.float64) * fade)[:, None, :]
-    # Back to front, so a near wall hides what stands behind it.
-    for depth, top_y in sorted(hurdles, key=lambda h: -h[0]):
-        if not (np.isfinite(depth) and np.isfinite(top_y)) or depth < MIN_DEPTH: continue
-        top = centre + focal * (top_y - eye_y) / depth
-        base = centre + focal * (ground_y - eye_y) / depth
-        first = int(np.clip(np.floor(top), 0, height))
-        last = int(np.clip(np.ceil(base), 0, height))
+    # Back to front, so a near wall hides what stands behind it. Hurdles and
+    # overhangs share one ordering: the two halves of a pipe pair sit at the
+    # same depth, and a nearer pair has to occlude a farther one on both sides
+    # of the gap, not just the floor side.
+    walls = [(d, 'hurdle', y) for d, y in hurdles] + [(d, 'overhang', y) for d, y in overhangs]
+    for depth, kind, edge_y in sorted(walls, key=lambda w: -w[0]):
+        if not (np.isfinite(depth) and np.isfinite(edge_y)) or depth < MIN_DEPTH: continue
+        edge = centre + focal * (edge_y - eye_y) / depth
+        if kind == 'hurdle':
+            # Stands on the ground: from its top edge down to the ground plane.
+            far_edge = centre + focal * (ground_y - eye_y) / depth
+            first, last = edge, far_edge
+        else:
+            # Hangs from above: from out of frame down to its bottom edge. The
+            # slab has no top in the world, so the frame's top row is the limit.
+            first, last = 0., edge
+        first = int(np.clip(np.floor(first), 0, height))
+        last = int(np.clip(np.ceil(last), 0, height))
         if last > first: frame[first:last, :] = hazed(palette['hurdle'], palette['sky'], depth, haze_scale)
     return frame

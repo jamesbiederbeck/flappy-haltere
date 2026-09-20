@@ -12,17 +12,17 @@ horizontally, placed by distance rather than by screen position. See that
 module for why the shipped camera's picture misrepresents what the bird can
 actually do about an obstacle.
 
-Only the *lower* pipe is projected: a hurdle has no ceiling above the
-runner. The upper pipe still exists in the env and still ends the episode
-on collision -- flying too high remains exactly as fatal -- it is simply
-not drawn as an obstacle. Game physics, scoring and collision are untouched
-throughout; only the picture changes, for both the neural visual input and
-the human broadcast view (always the same frame here, matching
+Both pipes are projected: the lower pipe as a hurdle standing on the
+ground, the upper pipe as an overhang hanging from above -- the two edges of
+the gap the bird has to thread. Game physics, scoring and collision are
+untouched throughout; only the picture changes, for both the neural visual
+input and the human broadcast view (always the same frame here, matching
 doom/game.py's convention).
 """
 import numpy as np
 import pygame
-from flappy_bird_gymnasium.envs.constants import PIPE_VEL_X, PLAYER_HEIGHT, PLAYER_WIDTH
+from flappy_bird_gymnasium.envs.constants import (
+    PIPE_HEIGHT, PIPE_VEL_X, PLAYER_HEIGHT, PLAYER_WIDTH)
 from flappy_bird_gymnasium.envs.flappy_bird_env import FlappyBirdEnv
 from flappy.render3d import MIN_DEPTH, render
 
@@ -85,7 +85,8 @@ class Game:
         env = self.env
         return render((env._screen_height, env._screen_width),
                       float(env._player_y) + PLAYER_HEIGHT / 2, float(env._ground['y']),
-                      self._hurdles(), self.tick * abs(PIPE_VEL_X), self._palette())
+                      self._hurdles(), self.tick * abs(PIPE_VEL_X), self._palette(),
+                      overhangs=self._overhangs())
 
     def _hurdles(self):
         """(depth ahead, top edge y) for every lower pipe still in front of
@@ -97,6 +98,20 @@ class Game:
         if self._no_pipes: return []
         player_x = self.env._player_x
         return [(float(pipe['x']) - player_x, float(pipe['y'])) for pipe in self.env._lower_pipes
+                if float(pipe['x']) - player_x >= MIN_DEPTH]
+
+    def _overhangs(self):
+        """(depth ahead, bottom edge y) for every upper pipe still in front of
+        the bird -- the ceilings it has to stay under.
+
+        The env stores an upper pipe by the y of its *top*, which is off the
+        top of the screen; the edge that matters is PIPE_HEIGHT below that.
+        Same no_pipes guard as _hurdles: parked pipes keep real x values with
+        a sentinel y, which would project as a ceiling covering the world."""
+        if self._no_pipes: return []
+        player_x = self.env._player_x
+        return [(float(pipe['x']) - player_x, float(pipe['y']) + PIPE_HEIGHT)
+                for pipe in self.env._upper_pipes
                 if float(pipe['x']) - player_x >= MIN_DEPTH]
 
     def _palette(self):
