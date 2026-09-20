@@ -20,3 +20,16 @@
 - Do not modify `connectome_sim/`'s kernel or engine from this repo; that
   submodule is a separate repository with its own constraints. Bump the
   submodule pointer instead.
+- Keep `README.md`'s "Best known agent" section current. Whenever a run beats
+  the recorded result — pipes cleared first, then longest episode as the
+  tiebreaker while the record is still zero — update that section in the same
+  change that produces the result, not later. It needs the numbers (ticks,
+  episodes, longest episode, pipe strikes, pipes cleared), the run's report
+  file under `outputs/`, and the exact command line that reproduces it,
+  including every flag that differs from the defaults. A claimed improvement
+  with no runnable invocation does not go in.
+- Do not quietly raise the record. If a better score comes from a changed
+  harness, decoder or reward rather than from the fly playing better, say so in
+  the section, because those are not comparable to earlier entries. State
+  explicitly when the record is still zero rather than presenting the
+  best-performing configuration as if it were succeeding.
