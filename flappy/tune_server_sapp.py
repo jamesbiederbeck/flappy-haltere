@@ -1,25 +1,29 @@
-"""Tunable live web UI for the Flappy Bird haltere-stimulation harness.
+"""Tunable live web UI driving just the two responsive SApp haltere afferents.
 
-Two sliders (m, n) live-adjust the power-law activation A(dy) = m * dy^n
-that maps the bird's fall speed to haltere current, applied every tick
-without restarting the simulation -- see flappy/circuit.py for why haltere
-current is what drives the wing motor neurons at all. Pipes are disabled
-(Game(no_pipes=True)) so the only failure mode is the ground/ceiling; the
-search target here is stable flight, not score.
+Two independent sliders (voltage_l, voltage_r) inject a constant mV-equivalent
+current directly into SApp_L (body_id 136883) and SApp_R (body_id 101048) --
+the only two cells, out of SApp's 148-cell undifferentiated bulk, found to
+respond alone (flybody-connectome/experiments/LOG.md's 2026-09-19 single-cell
+sweep; connectome-lab/experiments-summary.tsv). Their individually-measured DC
+thresholds are 18mV (L) and 15mV (R) (2026-09-20 threshold sweep, same log),
+which is why the sliders default there.
 
-Streams coordinates, not frames: /state is a small JSON object (bird
-y/velocity/rotation, haltere current, flap, spike counts) and the page
-draws its own canvas sprite client-side, unlike doom/server.py and
-flappy/server.py's base64 JPEG frame.
+Unlike tune_server.py's haltere activation curve, current here is NOT derived
+from the bird's fall speed -- each slider holds its own cell at whatever
+voltage it says, every tick, independent of game state. This is a
+stimulation/readout tool over these two specific cells (mirroring the SApp
+lab in the Android app, minus its frequency/phase/duty-cycle controls, which
+don't have a web-UI equivalent here), not a haltere-to-flight controller --
+the Flappy Bird game underneath is a live, familiar readout surface, not the
+point.
 
-Frozen weights throughout -- still a simulation, not a learning run. Only
-GET is exposed: /params (a bounded, in-memory numeric knob) and /reset
-(forces a fresh episode -- position/velocity reset, AND a full connectome
-reset back to Brain.__init__'s starting state, on the next tick, without
-waiting for a crash) are the only mutating endpoints, and neither touches a
-filesystem, shell, credential, or the model itself. A crash-triggered new
-episode does not reset the brain -- only /reset does; see the comment where
-it's handled in run_loop for why that split is deliberate.
+Streams coordinates the same way tune_server.py does; see that module for the
+shared design notes (frozen weights, GET-only mutating endpoints, /reset also
+resetting the connectome via Brain.reset(), etc) -- this is a copy rather than
+an import of that structure because the two differ in exactly the stimulation
+model and the params being tuned, and duplicating ~250 lines of a self-
+contained script for a materially different tool is more legible than
+threading a shared base class through both for two knobs.
 """
 import argparse
 import json
@@ -30,8 +34,9 @@ import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import numpy as np
 from connectome_sim.native import NativeBrain
-from flappy.circuit import haltere_afferents, haltere_current_for_velocity, wing_motor_readouts
+from flappy.circuit import wing_motor_readouts
 from flappy.controls import FlapControls
 from flappy.game import Game, FPS
 from connectome_sim.vision.retina import BilinearLuminance
@@ -40,10 +45,27 @@ ROOT = Path(__file__).resolve().parents[1]
 latest = {'status': 'starting', 'generated_at_ms': 0}
 # Plain dict item assignment/read is atomic under the GIL, same convention
 # doom/server.py and flappy/server.py already rely on for `latest`.
-params = {'m': 1.75, 'n': 2.0}
-PARAM_BOUNDS = {'m': (0., 10.), 'n': (0.1, 4.)}
+SAPP_BODY_IDS = {'L': '136883', 'R': '101048'}
+params = {'voltage_l': 18.0, 'voltage_r': 15.0}
+PARAM_BOUNDS = {'voltage_l': (0., 30.), 'voltage_r': (0., 30.)}
 stop = threading.Event()
 reset_requested = threading.Event()
+
+
+def sapp_indices(brain):
+    """Graph indices for SApp_L/SApp_R, resolved by body_id -- same technique
+    connectome_sim/export_android.py's sapp_pair export and
+    flybody-connectome's haltere_sapp_pulse.py/haltere_sapp_threshold.py use.
+    """
+    ids = brain.ids.astype(str)
+    out = {}
+    for side, body_id in SAPP_BODY_IDS.items():
+        matches = np.flatnonzero(ids == body_id)
+        if len(matches) != 1:
+            raise ValueError(f'expected exactly one graph index for SApp_{side} '
+                             f'(body_id {body_id}), got {len(matches)}')
+        out[side] = int(matches[0])
+    return out
 
 
 def run_loop(args):
@@ -56,7 +78,9 @@ def run_loop(args):
         else:
             from connectome_sim.native import BUILD
             brain = NativeBrain(path); build = BUILD
-        haltere = haltere_afferents(brain)
+        sapp = sapp_indices(brain)
+        l_idx = np.array([sapp['L']], dtype=np.int32)
+        r_idx = np.array([sapp['R']], dtype=np.int32)
         dlm = wing_motor_readouts(brain)
         controls = FlapControls(dlm)
         game = Game(seed=args.seed, no_pipes=True)
@@ -67,23 +91,15 @@ def run_loop(args):
         total_spikes, best_survival = 0, 0
         seq = 0
         start = time.monotonic()
-        print(json.dumps({'status': 'running', 'run_id': run_id, 'port': args.port}), flush=True)
+        print(json.dumps({'status': 'running', 'run_id': run_id, 'port': args.port,
+                          'sapp_indices': sapp}), flush=True)
         while not stop.is_set():
             obs = game.observation()
             if reset_requested.is_set():
-                # The manual reset, distinct from a crash-triggered new
-                # episode below: this also clears the connectome back to
-                # Brain.__init__'s starting state (Brain.reset(), added
-                # because neither NativeBrain nor GPUBrain exposed one
-                # before). Without this, membrane potentials, the spike
-                # queue and photoreceptor adaptation all carried across
-                # every reset and every m/n value tried in the live tuner --
-                # exactly the "reusing one brain across conditions carries
-                # state" failure this project's own methodology already
-                # names elsewhere. A crash-triggered episode does NOT reset
-                # the brain: that's deliberate, matching every other
-                # frozen-weight run script here treating the brain as
-                # continuously running across episodes.
+                # Same split as tune_server.py: only the manual reset clears
+                # the connectome (Brain.reset()); a crash-triggered new
+                # episode below does not, matching every other frozen-weight
+                # run script here.
                 brain.reset()
                 best_survival = max(best_survival, obs['tick'])
                 game.new_episode()
@@ -95,9 +111,8 @@ def run_loop(args):
                 obs = game.observation()
             frame = game.pixels()
             light = retina.sample(frame, brain.uv)
-            m, n = params['m'], params['n']
-            current = haltere_current_for_velocity(obs['y_velocity'], m=m, n=n)
-            stimulation = (haltere, current) if current > 0 else None
+            vl, vr = params['voltage_l'], params['voltage_r']
+            stimulation = [pair for pair in [(l_idx, vl), (r_idx, vr)] if pair[1] > 0] or None
             counts, neural_wall = brain.step(light, duration_ms, sugar=False, stimulation=stimulation)
             action = controls.decode(counts, duration_ms / 1000)
             game.act(action['flap'])
@@ -110,11 +125,12 @@ def run_loop(args):
                 'generated_at_ms': int(time.time() * 1000), 'backend': args.backend,
                 'geometry': geometry,
                 'bird': {'y': obs['y'], 'rotation': obs['rotation'], 'y_velocity': obs['y_velocity']},
-                'flap': action['flap'], 'haltere_current': round(current, 3),
-                'params': {'m': m, 'n': n},
+                'flap': action['flap'],
+                'params': {'voltage_l': vl, 'voltage_r': vr},
                 'game': {'episode': obs['episode'], 'tick': obs['tick'],
                          'best_survival_ticks': max(best_survival, obs['tick'])},
                 'dlm_spikes': int(sum(int(counts[r['index']]) for r in dlm)),
+                'sapp_spikes': {'L': int(counts[sapp['L']]), 'R': int(counts[sapp['R']])},
                 'clocks': {
                     'wall_seconds': round(wall_seconds, 3),
                     'neural_seconds': round(brain.sim_ms / 1000, 4),
@@ -133,7 +149,7 @@ def run_loop(args):
 
 
 PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Flappy haltere tuner</title>
+<html><head><meta charset="utf-8"><title>SApp stimulation tuner</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0;display:flex;gap:24px;padding:20px;flex-wrap:wrap}
 canvas{background:#4ec0e0;border:1px solid #333;border-radius:4px}
@@ -146,7 +162,7 @@ input[type=range]{width:100%}
 .alive{color:#7f7}
 .flap{color:#ff7}
 h1{font-size:16px;margin:0 0 4px}
-.formula{font-family:monospace;color:#7fd;font-size:14px}
+.sub{font-size:11px;color:#888;margin-bottom:10px}
 button{margin-top:14px;padding:8px 14px;font-size:13px;background:#333;color:#eee;border:1px solid #555;border-radius:4px;cursor:pointer}
 button:hover{background:#444}
 button:active{background:#555}
@@ -154,22 +170,22 @@ button:active{background:#555}
 <body>
 <canvas id="c" width="288" height="512"></canvas>
 <div class="panel">
-<h1>Haltere activation tuner</h1>
-<div class="formula" id="formula">A(&Delta;y) = m &middot; &Delta;y&#8319;</div>
-<label>m (gain) = <span class="val" id="mval"></span>
-  <input type="range" id="m" min="0" max="10" step="0.05" value="1.75">
+<h1>SApp stimulation tuner</h1>
+<div class="sub">SApp_L body_id 136883 (threshold ~18mV) &middot; SApp_R body_id 101048 (threshold ~15mV)</div>
+<label>SApp_L voltage (mV) = <span class="val" id="vlval"></span>
+  <input type="range" id="voltage_l" min="0" max="30" step="0.5" value="18">
 </label>
-<label>n (exponent) = <span class="val" id="nval"></span>
-  <input type="range" id="n" min="0.1" max="4" step="0.05" value="2">
+<label>SApp_R voltage (mV) = <span class="val" id="vrval"></span>
+  <input type="range" id="voltage_r" min="0" max="30" step="0.5" value="15">
 </label>
 <button id="resetBtn">Reset bird + connectome</button>
 <hr style="border-color:#333;margin-top:18px">
 <div class="stat" id="status">connecting...</div>
 <div class="stat">tick: <span id="tick"></span> &nbsp; episode: <span id="episode"></span></div>
 <div class="stat">y_velocity: <span id="vy"></span></div>
-<div class="stat">haltere current: <span id="cur"></span></div>
 <div class="stat">flap: <span id="flapind"></span></div>
 <div class="stat">DLM spikes/tick: <span id="dlm"></span></div>
+<div class="stat">SApp_L spikes/tick: <span id="sappL"></span> &nbsp; SApp_R spikes/tick: <span id="sappR"></span></div>
 <div class="stat">survived this episode: <span id="survived"></span> ticks</div>
 <div class="stat">best survival: <span id="best"></span> ticks</div>
 <div class="stat">sim speed: <span id="speed"></span>x realtime</div>
@@ -180,13 +196,12 @@ const ctx = $('c').getContext('2d');
 let pending = null;
 
 function pushParams() {
-  const m = $('m').value, n = $('n').value;
-  $('mval').textContent = m; $('nval').textContent = n;
-  $('formula').innerHTML = 'A(&Delta;y) = ' + m + ' &middot; &Delta;y<sup>' + n + '</sup>';
+  const vl = $('voltage_l').value, vr = $('voltage_r').value;
+  $('vlval').textContent = vl; $('vrval').textContent = vr;
   clearTimeout(pending);
-  pending = setTimeout(() => fetch(`/params?m=${m}&n=${n}`), 80);
+  pending = setTimeout(() => fetch(`/params?voltage_l=${vl}&voltage_r=${vr}`), 80);
 }
-$('m').oninput = pushParams; $('n').oninput = pushParams;
+$('voltage_l').oninput = pushParams; $('voltage_r').oninput = pushParams;
 $('resetBtn').onclick = () => fetch('/reset');
 
 function draw(s) {
@@ -212,9 +227,10 @@ async function poll() {
     $('tick').textContent = s.game.tick;
     $('episode').textContent = s.game.episode;
     $('vy').textContent = s.bird.y_velocity.toFixed(2);
-    $('cur').textContent = s.haltere_current.toFixed(3) + ' mV-eq';
     $('flapind').innerHTML = s.flap ? '<span class="flap">FLAP</span>' : '&mdash;';
     $('dlm').textContent = s.dlm_spikes;
+    $('sappL').textContent = s.sapp_spikes.L;
+    $('sappR').textContent = s.sapp_spikes.R;
     $('survived').textContent = s.game.tick;
     $('best').textContent = s.game.best_survival_ticks;
     $('speed').textContent = s.clocks.speed;
@@ -237,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(latest, separators=(',', ':')).encode(), 'application/json')
         elif parsed.path == '/params':
             query = urllib.parse.parse_qs(parsed.query)
-            for key in ('m', 'n'):
+            for key in ('voltage_l', 'voltage_r'):
                 if key not in query: continue
                 try:
                     value = float(query[key][0])
@@ -251,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == '/reset':
             # Requests a fresh episode (position/velocity reset) AND a full
             # connectome reset on the next tick without waiting for a crash;
-            # does not touch m/n.
+            # does not touch voltage_l/voltage_r.
             reset_requested.set()
             self._send(200, b'{"ok":true}', 'application/json')
         else:
@@ -272,7 +288,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--port', type=int, default=8771)
+    p.add_argument('--port', type=int, default=8772)
     p.add_argument('--bind', default='127.0.0.1')
     p.add_argument('--dataset', default='malecns_v1')
     p.add_argument('--seed', type=int, default=41027)

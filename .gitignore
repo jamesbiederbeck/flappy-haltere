@@ -1,5 +1,7 @@
 *.npz
 __pycache__/
 *.pyc
-.venv*/
+.venv*
 .pytest_cache/
+connectome_data/
+outputs/

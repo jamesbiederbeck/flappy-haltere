@@ -1,5 +1,9 @@
 # flappy-haltere constraints
 
+- Read `../connectome-lab/REPRODUCIBILITY.md` before touching `connectome_sim`,
+  seeding, or anything cross-episode: infrastructure-level reproducibility
+  rules (submodule/symlink handling, GPU/render backend determinism,
+  third-party env reseeding) live there, not duplicated per-repo.
 - This is a research harness, not a biological claim. Every haltere
   stimulation is host-side current injected before the connectome engine's
   kernel runs (in `connectome_sim/`) — an engineered joystick, not a measured
