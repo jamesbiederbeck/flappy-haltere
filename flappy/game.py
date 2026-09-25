@@ -20,6 +20,7 @@ throughout; only the picture changes, for both the neural visual input and
 the human broadcast view (always the same frame here, matching
 doom/game.py's convention).
 """
+import math
 import numpy as np
 import pygame
 from flappy_bird_gymnasium.envs.constants import (
@@ -200,6 +201,28 @@ class Game:
                 'pipes_cleared': self.pipes_cleared,
                 'y_velocity': float(self.env._player_vel_y),
                 'y': float(self.env._player_y), 'rotation': float(self.env._player_rot)}
+
+    def obstacles(self):
+        """Nearest lower-pipe hurdle and upper-pipe overhang ahead of the
+        bird, as {'distance', 'angle'} dicts measured from the bird's own
+        eye (the same eye_y `pixels()` projects from) -- angle in radians,
+        0 level, positive downward (the pipe edge sits below eye height).
+        None for a side with nothing in view (no_pipes mode, or nothing
+        within MIN_DEPTH).
+
+        This is the literal env geometry `pixels()`'s 3D projection is built
+        from, exposed directly (not by reaching into `_hurdles`/`_overhangs`
+        from outside this class) so other modules can wire raw game
+        telemetry into non-visual neuron populations -- see flappy/agent.py.
+        """
+        eye_y = float(self.env._player_y) + PLAYER_HEIGHT / 2
+
+        def nearest(pairs):
+            if not pairs: return None
+            depth, edge_y = min(pairs, key=lambda p: p[0])
+            return {'distance': float(depth), 'angle': float(math.atan2(edge_y - eye_y, depth))}
+
+        return {'lower': nearest(self._hurdles()), 'upper': nearest(self._overhangs())}
 
     def geometry(self):
         """Fixed screen/sprite dimensions for a coordinate-only renderer (no

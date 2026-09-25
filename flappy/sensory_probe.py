@@ -114,19 +114,23 @@ def disc(radius, field, horizon=.55):
     return frame, r
 
 
-def observe(brain, frame, groups, ticks, reset_fn, stimulation=None):
+def observe(brain, frame, groups, ticks, reset_fn, stimulation=None, lamina_bias=12.0):
     """One independent sample: cold start, then hold the frame for `ticks`
     game ticks, summing spikes per readout group.
 
     `stimulation` is passed through to the engine unchanged, so a cue can be
-    probed on top of a driven baseline as well as on a resting one."""
+    probed on top of a driven baseline as well as on a resting one.
+    `lamina_bias` is passed through to `brain.step` unchanged too (12.0 is
+    its own default, so existing callers are unaffected) -- it is the
+    photoreceptor->lamina gain, a second real dial on the *real* vision
+    pathway, distinct from any injected current."""
     reset_fn(brain)
     lum = retinal_samples(frame, brain.uv)
     totals = {k: np.zeros(len(v), dtype=np.int64) for k, v in groups.items()}
     network = 0
     dlm_per_tick = []
     for _ in range(ticks):
-        counts, _ = brain.step(lum, TICK_MS, stimulation=stimulation)
+        counts, _ = brain.step(lum, TICK_MS, lamina_bias=lamina_bias, stimulation=stimulation)
         counts = np.asarray(counts)
         network += int(counts.sum())
         for k, idx in groups.items(): totals[k] += counts[idx]
