@@ -26,8 +26,56 @@ for the full experiment history.
 
 ## Best known agent
 
-**Record: 0 pipes cleared under the current engine. A superseded configuration
-scored 2, and the two are not comparable.**
+**Record: 49 pipes cleared in a single 6,000-tick run (T=560, seed 41027).
+The "0 pipes cleared" record below was a measurement artifact, not a
+behavior regression or an improvement -- see the correction after it before
+reading the rest of this section.**
+
+### Correction, 2026-09-24: "0 pipes cleared" was undercounting, not measuring zero
+
+`flappy/run_decode.py`'s `arm()` reads `game.pipes_cleared` and
+`game.pipe_strikes` once, after the whole tick loop -- but `Game.new_episode()`
+resets both counters to 0 every episode, so that call only ever reported the
+*last* (often still in-progress) episode's count, never the run's total. At
+~30 episodes per 2,000-tick run (see the episode counts in the table below)
+that discarded almost every pipe the run actually cleared. The "0 pipes
+cleared" record was never a measurement of zero avoidance; it was a bug in
+how the number was accumulated.
+
+`flappy/run_agent_scoreboard.py` (and the `ConnectomeAgent` framework in
+`flappy/agent.py` it's built on) fixes this by accumulating both counters at
+every episode boundary. Re-run at the same T=560 configuration, longer
+(6,000 ticks) and correctly counted:
+
+| threshold | seed | flap fraction | episodes | longest episode | pipes cleared | best score |
+| --- | --- | --- | --- | --- | --- | --- |
+| T=480 | 41027 | 0.0613 | 107 | 88 | 17 | 1 |
+| T=480 | 99 | 0.0613 | 104 | 93 | 28 | 1 |
+| **T=560** | 41027 | 0.0527 | 84 | 213 | **49** | 5 |
+| **T=560** | 99 | 0.0525 | 92 | 163 | **42** | 3 |
+| T=720 | 41027 | 0.0408 | 120 | 54 | 0 | 0 |
+| T=720 | 99 | 0.0407 | 120 | 53 | 0 | 0 |
+
+Full data, including the exact reproduction command and git sha for every
+row, is in [`flappy_fly_scores.md`](flappy_fly_scores.md). T=480 over-flaps
+slightly and T=720 can't hold altitude at all (same failure shape as the
+original any-spike decoder, just less extreme) -- T=560 sits closest to the
+game's exact hover rate (1/19 = 0.0526) and clears far more pipes at both
+seeds, so it isn't an arbitrary historical pick.
+
+**This does not change the "not avoidance" caveat below.** Nothing about the
+decoder or the connectome changed; only the counting did. The bird still
+holds one fixed altitude and clears a pipe when a gap happens to line up
+with it -- a longer, correctly-counted run just gives that chance alignment
+many more tries per run (84–120 episodes instead of the ~2,000-tick table's
+~30), which is why the count looks so different. Reproduce it:
+
+```sh
+python -m flappy.run_agent_scoreboard --backend gpu --ticks 6000 \
+  --seeds 41027 99 --thresholds 480 560 720 --no-any-spike
+```
+
+---
 
 On 2026-09-19 the harness cleared its first pipes: 2 across 14,000 ticks, one
 scoring run in seven. On 2026-09-20 the photoreceptor transfer function was
