@@ -1848,3 +1848,94 @@ per arm, current injected into the 2 DNp01 cells only.
 **Status: E-GF closed.** The obvious follow-up is embodied: fire DNp01 in
 `flybody-connectome` with the leg motor map active and measure whether the body
 actually leaves the ground, which is what TTM recruitment is supposed to mean.
+
+---
+
+## Class E-DOPA — does a calibrated dopamine pulse or a different trigger population change the E-REACH null?
+
+**Hypothesis.** E-REACH established that the plastic KC->MBON11 edges have
+zero overlap with DLM's presynaptic set -- no learning along that route can
+change flap behaviour. Every prior learning run used PPL101 current pulses
+and sugar-cell reward with invented magnitudes (`flappy/training.py`:
+"+4 mV-equivalent", "+30"). This asks two further questions disconnection
+alone doesn't settle: does a completely different aversive trigger
+population (heat/thermosensory instead of PPL101 directly), or a
+biologically-calibrated dopamine pulse (Huang et al. 2024's own measured
+shock-evoked PPL101 rate, not an invented current), change the behavioural
+null? And separately: is the plastic weight trajectory actually driven by
+the reward/punishment events it's gated on, or by something else?
+
+**Parameters.** Fresh `GPUMemoryBrain` per condition (state not carried
+over between conditions, unlike `flappy/learn.py`'s standing convention --
+this class isolates condition effects). Each brain calibrated to Huang et
+al. 2024's measured baseline (`connectome_sim.physiology.calibration.
+calibrated_brain`'s own tonic: MB 9.87 mV, DAN 11.3125 mV, `dan_baseline_hz`
+20.09). Aversive event (ground/ceiling contact, or a pipe strike where
+pipes are present): thermosensory cells (`class=='thermosensory'`, 25
+cells) at 20 mV, paired with a PPL101 pulse at 4.5 mV -- calibrated
+in-session by sweeping pulse current against
+`connectome-sim/research/huang-2024/targets.json`'s `PPL101_shock` target
+(mean 50.14 Hz): 4.5 mV on top of the tonic baseline gives 50.00 Hz, a near
+exact match. 6,000 ticks (~200 s) per condition. Four conditions: pipes +
+haltere reflex on; no pipes + haltere on; no pipes + haltere off + dark
+retina; no pipes + haltere off + real `game.pixels()` visual input.
+
+**Metrics.** Episode-length survival (`early_mean`/`late_mean`/`gain`,
+matching `flappy/learn.py`'s own `survival()`), pipe strikes/clears, DLM
+total spikes, and `brain.memory()`'s plastic-edge change count and mean
+efficacy before/after.
+
+**Results.**
+
+| condition | dopamine pulses delivered | episode lengths | edges changed | mean efficacy |
+| --- | ---: | --- | ---: | ---: |
+| pipes + haltere | 120 | all 120 episodes exactly 50 ticks, gain 0.0 | 2,009 | 0.928 |
+| no pipes + haltere | 0 (never crashed) | 6,000/6,000, no crash | 2,042 | **0.940** |
+| no pipes, no haltere, dark | 1 | [31, 5969] | 1,993 | 0.885 |
+| no pipes, no haltere, real vision | 1 | **[31, 5969]** | 2,013 | 0.889 |
+
+An uncalibrated pilot (invented thermosensory-only aversive, no dopamine
+pulse, zero tonic/`dan_baseline_hz`) produced the identical episode lengths
+in every one of these four conditions -- see
+`connectome-lab/findings/10-the-teacher-does-not-move-the-hand.md` for that
+comparison table.
+
+**Conclusions.**
+
+1. **Behaviour is unchanged from the uncalibrated pilot, condition for
+   condition.** Using the real paper-calibrated dopamine pulse instead of an
+   invented current, and a completely different sensory trigger (heat)
+   instead of driving PPL101 directly, rules out "the stimulus was just too
+   weak or badly tuned" as an explanation for E-REACH's null. It is the
+   topology, not the magnitude.
+
+2. **Real, dynamically-changing visual input during actual gameplay
+   produces literally identical episode lengths to permanent darkness** --
+   [31, 5969] both times, to the tick. Independent confirmation of
+   `findings/01-vision-stops-at-the-descending-neurons.md` and
+   `findings/08-the-swatter.md` from a new angle: a live game frame, not
+   just an injected or naturally-lit static scene, still doesn't reach
+   anything that matters within this timeframe.
+
+3. **Weight change tracks whether the haltere reflex is active, not how many
+   conditioning events fired.** 0 dopamine pulses (no-pipes+haltere)
+   produces *less* depression than 120 (pipes+haltere), which produces less
+   than 1 (no-haltere conditions). The plastic weight trajectory is not
+   responding to the reward/punishment signal it's supposedly gated on --
+   it's responding to whatever ambient KC/DAN activity level the rest of the
+   network sits at.
+
+4. **The dopamine baseline matters for interpreting past runs.** This run's
+   depression (mean efficacy 0.885-0.940) is milder than the uncalibrated
+   pilot's (0.862-0.880), most likely because the pilot left
+   `dan_baseline_hz` at its zero default -- computing the anti-Hebbian error
+   term against a biologically wrong zero dopamine baseline instead of
+   Huang et al.'s measured ~20 Hz tonic rate. The qualitative conclusion
+   (weight change insensitive to reward timing) holds under either baseline;
+   the magnitude does not.
+
+**Status: E-DOPA closed, negative on both questions.** No dopamine
+calibration or trigger-population change reaches DLM, and the plasticity
+mechanism's own weight trajectory does not track the conditioning signal it
+is gated on. Two independent, sufficient reasons this mechanism has never
+produced learned behaviour, now confirmed together in one run.

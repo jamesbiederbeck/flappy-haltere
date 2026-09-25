@@ -48,29 +48,17 @@ def reset(brain):
     residual activity ramped up by earlier trials instead of each starting
     from the same baseline -- confirmed empirically: a run of 5 back-to-back
     trials on a never-reset brain went silent/1265/1210/1308 spikes, tracking
-    accumulated ramp-up rather than that trial's own stimulation."""
-    is_gpu = hasattr(brain, '_cp')
-    brain.v[:] = -52
-    brain.g[:] = 0
-    brain.refractory[:] = 0
-    if is_gpu:
-        brain._queue[:] = 0
-        brain._queue_count[:] = 0
-        brain._counts[:] = 0
-    else:
-        brain.queue[:] = 0
-        brain.queue_count[:] = 0
-        brain.counts[:] = 0
-        brain.previous_drive[:] = 0
-        brain.active[:] = 0
-        brain.active_flag[:] = 0
-        initial = np.unique(np.r_[brain.retina, brain.lamina, brain.sugar])
-        brain.active[:len(initial)] = initial
-        brain.active_flag[initial] = 1
-        brain.nactive[:] = len(initial)
-    brain.luminance[:] = 0
-    brain.cursor = 0
-    brain.total_spikes = 0
+    accumulated ramp-up rather than that trial's own stimulation.
+
+    This used to hand-roll that restore per backend (hasattr(brain, '_cp')
+    branching for GPU vs CPU queue buffers), predating any backend having
+    its own reset() method. That hand-rolled version never reset
+    active/active_flag/nactive/retinal_adaptation on the GPU branch at all,
+    and couldn't reset MemoryBrain/GPUMemoryBrain's plastic weights on either
+    branch. Every backend now has a correct, complete reset() of its own
+    (connectome_sim.engine.Brain's copy-on-write STATE_FIELDS mechanism, see
+    its docstring) -- delegate to it instead of duplicating it here."""
+    brain.reset()
     brain.sim_ms = 0
 
 

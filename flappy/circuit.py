@@ -101,3 +101,67 @@ def haltere_current_for_velocity(y_velocity, m=1.75, n=2., max_velocity=PLAYER_M
     if y_velocity <= 0: return 0.
     current = m * min(float(y_velocity), max_velocity) ** n
     return current if ceiling is None else min(current, float(ceiling))
+
+
+def haltere_current_for_motion(y_velocity, previous_y_velocity, dt_seconds, m=1.75, n=2.,
+                               k=0.5, max_velocity=PLAYER_MAX_VEL_Y, ceiling=CURRENT_CEILING):
+    """Adds a derivative-sensitive term to haltere_current_for_velocity's pure
+    magnitude term, per Fox, Fairhall & Daniel 2010 (PNAS 107(8):3840-3845,
+    doi:10.1073/pnas.0912548107; connectome-lab/fox-et-al-2010-....pdf).
+
+    MEASURED, from the paper: spike-triggered averages for all 36 recorded
+    haltere primary afferents are dominated by two population features that
+    together capture 57% of feature variance and form a derivative pair (the
+    second closely resembles the time-derivative of the first, in 30 of 36
+    cells); those two shared population features capture 86+-14% of the
+    mutual information a full individual-cell model captures; mean spike
+    latency is 3.02+-2.28 ms with spike-timing jitter on repeated trials of
+    just 0.81+-0.15 ms. In short: primary afferents are short-latency,
+    high-precision detectors of a stimulus *feature* resembling a value and
+    its own derivative together, not a rate code for instantaneous stimulus
+    magnitude alone.
+
+    INFERRED, and this is the load-bearing assumption: that "responds to a
+    derivative-pair feature" transfers usefully onto this game's y_velocity
+    signal. It is a real stretch. The paper's actual stimulus is haltere
+    strain from body ROTATION -- the halteres oscillate at wingbeat frequency
+    and Coriolis forces from body rotation deflect that oscillation
+    out-of-plane, which is what the campaniform sensilla this population was
+    recorded from actually transduce. Flappy Bird's y_velocity is a
+    translational fall rate with no oscillation and no rotational component
+    at all. This function borrows the qualitative "magnitude-plus-derivative,
+    not magnitude-alone" encoding *principle* only; it is not a claim that
+    y_velocity's derivative resembles what a haltere afferent would encode
+    for this motion, because this motion has no haltere-relevant structure
+    for it to encode.
+
+    INVENTED: k (the derivative term's weight, relative to m) and the
+    additive combination of magnitude and derivative terms. The paper
+    describes a nonlinear 2D decision function over two derivative-pair
+    features (Fig. 6), not a linear sum of a value and its own finite
+    difference -- this is a cheap approximation of that shape, not a
+    reproduction of it. k=0.5 is a round number, not fitted to anything.
+
+    NOT implemented, and worth naming so it isn't mistaken for done: the
+    population's phase diversity (Fig. 7 -- real cells span nearly the whole
+    oscillation phase, each preferring a different phase of the stimulus
+    cycle) and the measured ~3 ms latency (would need sub-tick timing finer
+    than this harness's 33 ms game-tick granularity to express at all). Both
+    are real, well-evidenced properties of the biology this still ignores;
+    this function only adds derivative sensitivity to a single pooled
+    current, not a differentiated population response.
+
+    `previous_y_velocity` and `dt_seconds` are caller-tracked state (the
+    previous tick's y_velocity and the tick duration in seconds) -- this
+    function stays a pure function of its arguments, consistent with
+    haltere_current_for_velocity, rather than holding its own state.
+    """
+    if not math.isfinite(max_velocity) or max_velocity <= 0: raise ValueError('Positive max_velocity required')
+    if not all(math.isfinite(x) for x in (y_velocity, previous_y_velocity, dt_seconds, m, n, k)):
+        raise ValueError('Finite velocity, previous velocity, dt, m, n and k required')
+    if dt_seconds <= 0: raise ValueError('Positive dt_seconds required')
+    if ceiling is not None and not (math.isfinite(ceiling) and ceiling > 0): raise ValueError('Positive ceiling required')
+    magnitude = 0. if y_velocity <= 0 else m * min(float(y_velocity), max_velocity) ** n
+    derivative = max(0., (float(y_velocity) - float(previous_y_velocity)) / dt_seconds)
+    current = magnitude + k * derivative
+    return current if ceiling is None else min(current, float(ceiling))
